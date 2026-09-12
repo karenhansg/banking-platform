@@ -1,0 +1,22 @@
+# Application servers on ECS Fargate. The environment variables are set by the task definition
+# (infra/modules/ecs-service).
+spring:
+  datasource:
+    # The AWS Advanced JDBC Wrapper's IAM plugin signs a short-lived auth token with the ECS task role for every new
+    # connection, so the application's database user (banking_app) has no password to store, leak or rotate.
+    # TLS is mandatory and the server certificate is verified against the RDS CA bundle baked into the image.
+    url: jdbc:aws-wrapper:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}?sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem
+    driver-class-name: software.amazon.jdbc.Driver
+    username: ${DB_USERNAME}
+    hikari:
+      data-source-properties:
+        wrapperPlugins: iam
+  flyway:
+    # Migrations run beforehand as a one-off task with the schema owner's credentials (profile "migrate").
+    enabled: false
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+region            = "us-east-1"
+github_repository = "your-org/banking-platform"
+
+# From the infra/bootstrap outputs.
+github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+ecr_repository_url       = "123456789012.dkr.ecr.us-east-1.amazonaws.com/banking-api"
+ecr_repository_arn       = "arn:aws:ecr:us-east-1:123456789012:repository/banking-api"
+
+# Git SHA of an image already pushed to the repository (see docs/DEPLOYMENT.md, step 3).
+image_tag = "0123456789abcdef0123456789abcdef01234567"
+
+# Optional.
+# business_time_zone = "Asia/Singapore"
+# alarm_email        = "oncall@example.com"
+# domain_name        = "api.example.com"
+# route53_zone_id    = "Z0123456789ABCDEFGHIJ"

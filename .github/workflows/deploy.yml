@@ -1,0 +1,64 @@
+# Deploys a published image to one environment. Called by pipeline.yml once per environment.
+#
+# Configuration lives in the GitHub environment of the same name (values from `terraform output
+# github_environment_variables`); the AWS role it assumes trusts only jobs running in that environment.
+
+name: deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Environment to deploy (dev or prod)
+        required: true
+        type: string
+      image:
+        description: Full image reference, <registry>/banking-api:<git-sha>
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.environment }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ vars.API_BASE_URL }}
+    # Never run two deployments of the same environment at once, and never cancel one halfway.
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Migrate the database and roll out the API
+        env:
+          IMAGE: ${{ inputs.image }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+          API_TASK_FAMILY: ${{ vars.API_TASK_FAMILY }}
+          MIGRATION_TASK_FAMILY: ${{ vars.MIGRATION_TASK_FAMILY }}
+        run: scripts/deploy.sh
+
+      - name: Smoke test through the load balancer
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          ALLOW_SELF_SIGNED_TLS: ${{ vars.ALLOW_SELF_SIGNED_TLS }}
+          # Optional: set these on the environment to also exercise an authenticated round trip.
+          TOKEN_URL: ${{ vars.SMOKE_TEST_TOKEN_URL }}
+          CLIENT_ID: ${{ vars.SMOKE_TEST_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.SMOKE_TEST_CLIENT_SECRET }}
+        run: scripts/smoke-test.sh

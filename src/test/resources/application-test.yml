@@ -1,0 +1,12 @@
+banking:
+  # A zone with a UTC offset and daylight saving time, so day-boundary bugs cannot hide behind UTC.
+  business-time-zone: America/New_York
+  payments:
+    acceptance-window: P3D
+    # Tests drive the scheduler's work explicitly through PaymentService.
+    scheduler-enabled: false
+
+logging:
+  level:
+    com.example.banking: WARN
+    banking.audit: WARN

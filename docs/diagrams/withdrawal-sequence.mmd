@@ -1,0 +1,19 @@
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant E as WAF and load balancer
+    participant A as API task
+    participant D as PostgreSQL
+    C->>E: POST /api/v1/accounts/{id}/withdrawals<br/>Bearer token, Idempotency-Key
+    E->>A: forward over the private network
+    A->>A: verify token signature, issuer, expiry<br/>require accounts.write scope, validate body
+    A->>D: BEGIN, lock the account row
+    A->>D: look up the idempotency key
+    A->>D: sum today's withdrawals and payment holds
+    alt within the daily limit and the balance
+        A->>D: update balance, insert ledger entry, COMMIT
+        A-->>C: 201 Created with the transaction
+    else limit exceeded
+        A->>D: ROLLBACK
+        A-->>C: 422 DAILY_WITHDRAWAL_LIMIT_EXCEEDED<br/>"Please contact the bank for assistance."
+    end

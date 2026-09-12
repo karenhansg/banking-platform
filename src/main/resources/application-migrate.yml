@@ -1,0 +1,16 @@
+# One-off schema migration task, run by scripts/deploy.sh before each rollout. It connects as the RDS master user
+# (credentials injected by ECS from Secrets Manager), applies the Flyway migrations, validates the JPA mappings against
+# the migrated schema, and exits. The long-running application never holds these credentials.
+spring:
+  main:
+    web-application-type: none
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}?sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem
+    username: ${DB_MASTER_USERNAME}
+    password: ${DB_MASTER_PASSWORD}
+  flyway:
+    enabled: true
+
+banking:
+  payments:
+    scheduler-enabled: false

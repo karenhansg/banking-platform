@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> SCHEDULED: created with a future executeAt
+    [*] --> PENDING_ACCEPTANCE: created without executeAt, funds held now
+    SCHEDULED --> PENDING_ACCEPTANCE: due, funds held from source
+    SCHEDULED --> FAILED: due, but daily limit or balance insufficient
+    SCHEDULED --> CANCELLED: cancelled
+    PENDING_ACCEPTANCE --> COMPLETED: accepted, target credited
+    PENDING_ACCEPTANCE --> EXPIRED: not accepted in time, funds returned to source
+    COMPLETED --> [*]
+    EXPIRED --> [*]
+    CANCELLED --> [*]
+    FAILED --> [*]

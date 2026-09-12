@@ -1,0 +1,25 @@
+# Build output
+target/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Terraform (the dependency lock file .terraform.lock.hcl IS committed)
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+# Account-specific settings; see the *.example files
+terraform.tfvars
+backend.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc

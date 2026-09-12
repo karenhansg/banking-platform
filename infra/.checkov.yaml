@@ -1,0 +1,26 @@
+# Checkov policy exceptions that apply across the whole codebase, each with the reason it is accepted.
+# Exceptions that concern a single resource are declared next to that resource (#checkov:skip=...).
+framework:
+  - terraform
+compact: true
+quiet: true
+skip-check:
+  # Log retention is an explicit per-environment setting (365 days in prod, shorter in dev to save cost).
+  - CKV_AWS_338
+  # Multi-AZ, deletion protection and Performance Insights are per-environment settings, enabled in prod.
+  # Checkov evaluates the shared modules with their development defaults.
+  - CKV_AWS_157
+  - CKV_AWS_293
+  - CKV_AWS_353
+  - CKV_AWS_150
+  # TLS terminates at the load balancer; traffic to the tasks stays within private subnets and security groups.
+  # See docs/ARCHITECTURE.md (encryption in transit) for the trade-off.
+  - CKV_AWS_378
+  # The only buckets hold Terraform state and load balancer logs. Server access logging a log bucket is circular;
+  # object-level access is audited through CloudTrail data events instead.
+  - CKV_AWS_18
+  # Cross-region replication is not required at this stage: both buckets are versioned, and multi-region
+  # disaster recovery is listed as future work.
+  - CKV_AWS_144
+  # Nothing consumes S3 events from these buckets.
+  - CKV2_AWS_62

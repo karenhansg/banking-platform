@@ -1,0 +1,6 @@
+# Local development: docker compose provides PostgreSQL and a mock OAuth2 server (see docker-compose.yml).
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:banking}
+    username: ${DB_USERNAME:banking}
+    password: ${DB_PASSWORD:banking}

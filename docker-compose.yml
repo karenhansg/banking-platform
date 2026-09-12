@@ -1,0 +1,57 @@
+# Local environment: PostgreSQL, a mock OAuth2 server standing in for Cognito, and the API.
+#   docker compose up --build        then   scripts/get-token.sh   to obtain an access token
+name: banking
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: banking
+      POSTGRES_USER: banking
+      POSTGRES_PASSWORD: banking # local development only
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U banking -d banking"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  oauth2:
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.2
+    ports:
+      - "8090:8080"
+    environment:
+      # Issues tokens at http://localhost:8090/banking/token for any client, with the scopes requested.
+      # ($$ escapes compose interpolation; the server itself substitutes ${clientId} and ${scope}.)
+      JSON_CONFIG: >-
+        {"interactiveLogin": false,
+         "tokenCallbacks": [{
+           "issuerId": "banking",
+           "tokenExpiry": 3600,
+           "requestMappings": [{
+             "requestParam": "grant_type",
+             "match": "client_credentials",
+             "claims": {"sub": "$${clientId}", "scope": "$${scope}"}
+           }]
+         }]}
+
+  api:
+    build: .
+    # Same hardening as in ECS: read-only root filesystem with a writable /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      oauth2:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_HOST: postgres
+      # Tokens are requested from the host, so their issuer is localhost; the API fetches keys over the compose network.
+      JWT_ISSUER_URI: http://localhost:8090/banking
+      JWT_JWK_SET_URI: http://oauth2:8080/banking/jwks

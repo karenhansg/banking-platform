@@ -1,0 +1,1279 @@
+{
+  "info": {
+    "_postman_id": "b1c16e73-866a-42e2-a80b-c69854b011be",
+    "name": "Banking API",
+    "description": "Accounts, deposits, withdrawals with a daily limit, and scheduled payments.\n\n**Running it.** Import this collection and one of the environment files next to it (`local.postman_environment.json` for `make up`, `aws.postman_environment.json` for a deployed environment), then send any request: a pre-request script fetches an OAuth2 access token with the client credentials grant and reuses it until it expires.\n\nThe requests are ordered so that the whole collection can be run end to end with the Postman runner or newman; later requests use the IDs that earlier ones store in collection variables. Each run creates new accounts, so it can be run repeatedly.\n\n    newman run postman/banking-api.postman_collection.json -e postman/local.postman_environment.json\n\nRequests whose name ends in `(rejected)` assert an error response: they document the rules the API enforces, and a passing run means the rules still hold.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Fetches an access token with the OAuth2 client credentials grant and reuses it until shortly before it",
+          "// expires, so every request in this collection can also be sent on its own.",
+          "const expiresAt = Number(pm.collectionVariables.get('accessTokenExpiresAt') || 0);",
+          "if (pm.collectionVariables.get('accessToken') && Date.now() < expiresAt - 30000) {",
+          "    return;",
+          "}",
+          "",
+          "pm.sendRequest({",
+          "    url: pm.variables.replaceIn('{{tokenUrl}}'),",
+          "    method: 'POST',",
+          "    auth: {",
+          "        type: 'basic',",
+          "        basic: [",
+          "            { key: 'username', value: pm.variables.replaceIn('{{clientId}}') },",
+          "            { key: 'password', value: pm.variables.replaceIn('{{clientSecret}}') }",
+          "        ]",
+          "    },",
+          "    header: { 'Content-Type': 'application/x-www-form-urlencoded' },",
+          "    body: {",
+          "        mode: 'urlencoded',",
+          "        urlencoded: [",
+          "            { key: 'grant_type', value: 'client_credentials' },",
+          "            { key: 'scope', value: pm.variables.replaceIn('{{scopes}}') }",
+          "        ]",
+          "    }",
+          "}, (error, response) => {",
+          "    if (error || response.code !== 200) {",
+          "        console.error('Could not obtain an access token', error || response.text());",
+          "        return;",
+          "    }",
+          "    const token = response.json();",
+          "    pm.collectionVariables.set('accessToken', token.access_token);",
+          "    pm.collectionVariables.set('accessTokenExpiresAt', Date.now() + (token.expires_in || 3600) * 1000);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "tokenUrl",
+      "value": "http://localhost:8090/banking/token"
+    },
+    {
+      "key": "clientId",
+      "value": "local-client"
+    },
+    {
+      "key": "clientSecret",
+      "value": "local-secret"
+    },
+    {
+      "key": "scopes",
+      "value": "banking-api/accounts.read banking-api/accounts.write banking-api/payments.read banking-api/payments.write"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "accessTokenExpiresAt",
+      "value": "0"
+    },
+    {
+      "key": "accountId",
+      "value": ""
+    },
+    {
+      "key": "targetAccountId",
+      "value": ""
+    },
+    {
+      "key": "depositTransactionId",
+      "value": ""
+    },
+    {
+      "key": "idempotencyKey",
+      "value": ""
+    },
+    {
+      "key": "paymentId",
+      "value": ""
+    },
+    {
+      "key": "scheduledPaymentId",
+      "value": ""
+    },
+    {
+      "key": "executeAt",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "description": "The collection fetches a token automatically. This request is here to obtain one by hand, or to see what the token endpoint returns.",
+      "item": [
+        {
+          "name": "Get an access token",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{clientId}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{clientSecret}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "scope",
+                  "value": "{{scopes}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{tokenUrl}}",
+              "host": [
+                "{{tokenUrl}}"
+              ]
+            },
+            "description": "OAuth2 client credentials grant. Locally this is the mock OAuth2 server from docker compose; in AWS it is the Amazon Cognito token endpoint."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const token = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', token.access_token);",
+                  "pm.collectionVariables.set('accessTokenExpiresAt', Date.now() + (token.expires_in || 3600) * 1000);",
+                  "pm.test('returns a bearer token', () => {",
+                  "    pm.expect(token.token_type.toLowerCase()).to.eql('bearer');",
+                  "    pm.expect(token.access_token).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Accounts",
+      "description": "Opening accounts, moving money, and the rules that protect it.",
+      "item": [
+        {
+          "name": "Open an account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts"
+              ]
+            },
+            "description": "Opens an account with a zero balance. Its id is stored for the requests that follow.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerName\": \"Ada Lovelace\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const account = pm.response.json();",
+                  "pm.collectionVariables.set('accountId', account.id);",
+                  "pm.test('opens with a zero balance', () => pm.expect(account.balance).to.eql(0));",
+                  "pm.test('Location header points at the new account', () => pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/accounts/' + account.id));",
+                  "pm.test('the response carries a request id for log correlation', () => pm.expect(pm.response.headers.get('X-Request-Id')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Open a second account (payment target)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts"
+              ]
+            },
+            "description": "A second account, used later as the target of the scheduled payments.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerName\": \"Bob Martin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('targetAccountId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get the account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}"
+              ]
+            },
+            "description": "Reads the account back."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('is the account that was opened', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('accountId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deposit 2000.00",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/deposits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}",
+                "deposits"
+              ]
+            },
+            "description": "Deposits money. The Idempotency-Key header makes the request safe to retry; the next request reuses the same key.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 2000.0,\n  \"description\": \"Salary\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A fresh key per run, so the collection can be run repeatedly.",
+                  "pm.collectionVariables.set('idempotencyKey', 'deposit-' + pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const entry = pm.response.json();",
+                  "pm.collectionVariables.set('depositTransactionId', entry.id);",
+                  "pm.test('is recorded in the ledger as a deposit', () => {",
+                  "    pm.expect(entry.type).to.eql('DEPOSIT');",
+                  "    pm.expect(entry.amount).to.eql(2000);",
+                  "    pm.expect(entry.balanceAfter).to.eql(2000);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deposit again with the same Idempotency-Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/deposits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}",
+                "deposits"
+              ]
+            },
+            "description": "The retry a client would send after a timeout. The original transaction is returned and no second deposit is made.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 2000.0,\n  \"description\": \"Salary\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const entry = pm.response.json();",
+                  "pm.test('returns the original transaction', () => pm.expect(entry.id).to.eql(pm.collectionVariables.get('depositTransactionId')));",
+                  "pm.test('the money moved only once', () => pm.expect(entry.balanceAfter).to.eql(2000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Withdraw 700.00",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/withdrawals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}",
+                "withdrawals"
+              ]
+            },
+            "description": "A withdrawal within the daily limit of 1,000.00.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 700.0,\n  \"description\": \"ATM\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const entry = pm.response.json();",
+                  "pm.test('leaves 1300.00 in the account', () => {",
+                  "    pm.expect(entry.type).to.eql('WITHDRAWAL');",
+                  "    pm.expect(entry.balanceAfter).to.eql(1300);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get the balance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}",
+                "balance"
+              ]
+            },
+            "description": "The balance also reports what is left of today's withdrawal limit, so a client can tell the customer before they try."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const balance = pm.response.json();",
+                  "pm.test('balance is 1300.00', () => pm.expect(balance.balance).to.eql(1300));",
+                  "pm.test('300.00 of today\\'s limit remains after withdrawing 700.00', () => {",
+                  "    pm.expect(balance.dailyWithdrawalLimit).to.eql(1000);",
+                  "    pm.expect(balance.remainingDailyWithdrawalLimit).to.eql(300);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Withdraw over the daily limit (rejected)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/withdrawals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}",
+                "withdrawals"
+              ]
+            },
+            "description": "700.00 has already been withdrawn today, so 300.01 breaches the limit. The customer is told to contact the bank and the response says how much remains.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 300.01\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 Unprocessable Content', () => pm.response.to.have.status(422));",
+                  "const problem = pm.response.json();",
+                  "pm.test('is a problem response with a stable code', () => {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+                  "    pm.expect(problem.code).to.eql('DAILY_WITHDRAWAL_LIMIT_EXCEEDED');",
+                  "});",
+                  "pm.test('tells the customer to contact the bank', () => pm.expect(problem.detail).to.include('contact the bank'));",
+                  "pm.test('reports the remaining allowance', () => pm.expect(problem.remainingToday).to.eql(300));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Withdraw more than the balance (rejected)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{targetAccountId}}/withdrawals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{targetAccountId}}",
+                "withdrawals"
+              ]
+            },
+            "description": "The second account has no money in it, so any withdrawal is refused. Balances can never go negative.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 Unprocessable Content', () => pm.response.to.have.status(422));",
+                  "pm.test('code is INSUFFICIENT_FUNDS', () => pm.expect(pm.response.json().code).to.eql('INSUFFICIENT_FUNDS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Withdraw a fraction of a cent (rejected)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/withdrawals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}",
+                "withdrawals"
+              ]
+            },
+            "description": "Amounts have at most two decimal places and are rejected rather than rounded.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10.001\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "const problem = pm.response.json();",
+                  "pm.test('names the invalid field', () => {",
+                  "    pm.expect(problem.code).to.eql('VALIDATION_FAILED');",
+                  "    pm.expect(problem.errors[0].field).to.eql('amount');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/transactions?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "The account's ledger entries, newest first."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test('newest entry is the withdrawal', () => pm.expect(page.content[0].type).to.eql('WITHDRAWAL'));",
+                  "pm.test('the deposit was recorded once', () => pm.expect(page.content.filter(entry => entry.type === 'DEPOSIT')).to.have.lengthOf(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get the balance without a token (rejected)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}",
+                "balance"
+              ]
+            },
+            "description": "Every endpoint needs a valid access token.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('challenges the client', () => pm.expect(pm.response.headers.get('WWW-Authenticate')).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Scheduled payments",
+      "description": "Funds are held from the source account when a payment executes and are released when the target accepts, or returned if the payment expires.",
+      "item": [
+        {
+          "name": "Pay now (funds held)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments"
+              ]
+            },
+            "description": "Without executeAt the funds are taken from the source account immediately and held until the target accepts. The amount counts towards the source account's daily withdrawal limit.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"{{accountId}}\",\n  \"targetAccountId\": \"{{targetAccountId}}\",\n  \"amount\": 250.0,\n  \"description\": \"Invoice 1017\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const payment = pm.response.json();",
+                  "pm.collectionVariables.set('paymentId', payment.id);",
+                  "pm.test('waits for the target to accept', () => {",
+                  "    pm.expect(payment.status).to.eql('PENDING_ACCEPTANCE');",
+                  "    pm.expect(payment.heldAt).to.be.a('string');",
+                  "    pm.expect(new Date(payment.expiresAt)).to.be.greaterThan(new Date(payment.heldAt));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Balance after the hold",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{accountId}}/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{accountId}}",
+                "balance"
+              ]
+            },
+            "description": "The held 250.00 has left the source account and also used up part of today's withdrawal limit."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const balance = pm.response.json();",
+                  "pm.test('250.00 was taken from the balance', () => pm.expect(balance.balance).to.eql(1050));",
+                  "pm.test('the payment counts towards the daily limit', () => pm.expect(balance.remainingDailyWithdrawalLimit).to.eql(50));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get the payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{paymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{paymentId}}"
+              ]
+            },
+            "description": "Checks a payment's status."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('is still awaiting acceptance', () => pm.expect(pm.response.json().status).to.eql('PENDING_ACCEPTANCE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List the target account's payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments?accountId={{targetAccountId}}&status=PENDING_ACCEPTANCE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments"
+              ],
+              "query": [
+                {
+                  "key": "accountId",
+                  "value": "{{targetAccountId}}"
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING_ACCEPTANCE"
+                }
+              ]
+            },
+            "description": "How a target account finds the payments waiting for it to accept."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test('includes the payment from the first account', () => {",
+                  "    const ids = page.content.map(payment => payment.id);",
+                  "    pm.expect(ids).to.include(pm.collectionVariables.get('paymentId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Accept the payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{paymentId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{paymentId}}",
+                "accept"
+              ]
+            },
+            "description": "The target accepts and is credited with the held funds. Repeating this request is harmless."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const payment = pm.response.json();",
+                  "pm.test('is completed', () => {",
+                  "    pm.expect(payment.status).to.eql('COMPLETED');",
+                  "    pm.expect(payment.resolvedAt).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Target account balance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/accounts/{{targetAccountId}}/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "accounts",
+                "{{targetAccountId}}",
+                "balance"
+              ]
+            },
+            "description": "The accepted payment arrived."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('received 250.00', () => pm.expect(pm.response.json().balance).to.eql(250));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Schedule a payment for tomorrow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments"
+              ]
+            },
+            "description": "With executeAt in the future the payment is only scheduled: no money moves until it executes, and the daily limit is checked on the day it does.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"{{accountId}}\",\n  \"targetAccountId\": \"{{targetAccountId}}\",\n  \"amount\": 100.0,\n  \"executeAt\": \"{{executeAt}}\",\n  \"description\": \"Rent\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);",
+                  "tomorrow.setUTCHours(9, 0, 0, 0);",
+                  "pm.collectionVariables.set('executeAt', tomorrow.toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const payment = pm.response.json();",
+                  "pm.collectionVariables.set('scheduledPaymentId', payment.id);",
+                  "pm.test('no money has moved yet', () => {",
+                  "    pm.expect(payment.status).to.eql('SCHEDULED');",
+                  "    pm.expect(payment.heldAt).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel the scheduled payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{scheduledPaymentId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{scheduledPaymentId}}",
+                "cancel"
+              ]
+            },
+            "description": "A payment can be cancelled until it executes. Once its funds are held it can only be accepted or expire."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('is cancelled', () => pm.expect(pm.response.json().status).to.eql('CANCELLED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel a payment whose funds are held (rejected)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments/{{paymentId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "{{paymentId}}",
+                "cancel"
+              ]
+            },
+            "description": "The first payment has already completed, so cancelling it is refused and the response says what state it is in."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "const problem = pm.response.json();",
+                  "pm.test('reports the payment state', () => {",
+                  "    pm.expect(problem.code).to.eql('INVALID_PAYMENT_STATE');",
+                  "    pm.expect(problem.paymentStatus).to.eql('COMPLETED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pay yourself (rejected)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments"
+              ]
+            },
+            "description": "Source and target must be different accounts.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"{{accountId}}\",\n  \"targetAccountId\": \"{{accountId}}\",\n  \"amount\": 10.0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('code is INVALID_PAYMENT_REQUEST', () => pm.expect(pm.response.json().code).to.eql('INVALID_PAYMENT_REQUEST'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Operations",
+      "description": "Endpoints used by the platform rather than by API clients. They are not routed through the load balancer in AWS.",
+      "item": [
+        {
+          "name": "Readiness probe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/health/readiness",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "health",
+                "readiness"
+              ]
+            },
+            "description": "What the load balancer checks on each task. Unauthenticated, and not reachable from outside the VPC.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('reports UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "OpenAPI document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v3/api-docs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v3",
+                "api-docs"
+              ]
+            },
+            "description": "The generated OpenAPI document. Enabled locally only; the committed copy is docs/openapi.json.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('describes this API', () => pm.expect(pm.response.json().info.title).to.eql('Banking API'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

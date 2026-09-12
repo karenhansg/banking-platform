@@ -1,0 +1,9 @@
+flowchart LR
+    change["Pull request<br/>or merge to main"] --> test["Build and test<br/>unit and integration tests,<br/>coverage gate"]
+    change --> infra["Validate infrastructure<br/>fmt, validate, tflint,<br/>Checkov, shellcheck"]
+    test --> image["Build image<br/>hadolint, Trivy scan"]
+    image -->|main only| publish["Publish to ECR<br/>tagged with commit SHA"]
+    publish --> dev["Deploy dev<br/>migrate, roll out, smoke test"]
+    infra --> dev
+    dev --> approval{"Reviewer approval<br/>GitHub environment"}
+    approval --> prod["Deploy prod<br/>same image"]

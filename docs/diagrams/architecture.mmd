@@ -1,0 +1,43 @@
+flowchart TB
+    clients["API clients<br/>channel back ends, operations tools"]
+    cognito["Amazon Cognito<br/>OAuth2 token endpoint and signing keys"]
+    github["GitHub Actions<br/>OIDC federation, no stored keys"]
+    ecr["Amazon ECR<br/>immutable, scanned images"]
+
+    subgraph region["AWS Region: one VPC per environment, spanning 2-3 availability zones"]
+        waf["AWS WAF<br/>managed rules, per-IP rate limit"]
+
+        subgraph public["Public subnets"]
+            alb["Application Load Balancer<br/>HTTPS only, forwards /api/* only"]
+            nat["NAT gateways"]
+        end
+
+        subgraph private["Private subnets"]
+            api["ECS Fargate service<br/>Spring Boot API tasks, autoscaled,<br/>read-only filesystem"]
+            migrate["Migration task<br/>one-off, per deployment"]
+        end
+
+        subgraph isolated["Database subnets: no internet route"]
+            rds[("RDS PostgreSQL 17<br/>Multi-AZ in prod, TLS only")]
+        end
+
+        secrets["Secrets Manager<br/>RDS-managed master password"]
+        kms["KMS customer-managed key"]
+        cloudwatch["CloudWatch<br/>logs, metrics, alarms, dashboard"]
+        sns["SNS alarm topic"]
+    end
+
+    clients -->|"1. client credentials"| cognito
+    clients -->|"2. HTTPS with bearer token"| waf
+    waf --> alb
+    alb -->|"HTTP 8080"| api
+    api -->|"TLS, IAM auth token"| rds
+    migrate -->|"TLS, master credentials"| rds
+    secrets -.->|"injected at task start"| migrate
+    api -.->|"token signing keys, via NAT"| cognito
+    api -->|"JSON logs"| cloudwatch
+    cloudwatch --> sns
+    kms -.->|"encrypts"| rds
+    github -->|"push image"| ecr
+    github -->|"run migration, update service"| api
+    ecr -.->|"pull image"| api

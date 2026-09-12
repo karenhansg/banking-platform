@@ -1,0 +1,39 @@
+erDiagram
+    accounts ||--o{ account_transactions : "ledger of"
+    accounts ||--o{ scheduled_payments : "source of"
+    accounts ||--o{ scheduled_payments : "target of"
+    scheduled_payments |o--o{ account_transactions : "hold, refund, credit"
+
+    accounts {
+        uuid id PK
+        varchar owner_name
+        numeric balance "never negative"
+        timestamptz created_at
+        timestamptz updated_at
+        bigint version
+    }
+    account_transactions {
+        uuid id PK
+        uuid account_id FK
+        varchar type "DEPOSIT, WITHDRAWAL, PAYMENT_HOLD, PAYMENT_REFUND, PAYMENT_RECEIVED"
+        numeric amount "positive"
+        numeric balance_after
+        varchar description
+        uuid payment_id FK "set for payment entries only"
+        varchar idempotency_key "unique per account"
+        timestamptz created_at
+    }
+    scheduled_payments {
+        uuid id PK
+        uuid source_account_id FK
+        uuid target_account_id FK "differs from source"
+        numeric amount "positive"
+        varchar status
+        timestamptz execute_at
+        timestamptz held_at
+        timestamptz expires_at
+        timestamptz resolved_at
+        varchar failure_reason
+        varchar idempotency_key "unique per source account"
+        bigint version
+    }
