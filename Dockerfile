@@ -2,7 +2,7 @@
 
 # ---- Build ------------------------------------------------------------------------------------------------------
 # Runs on the build machine's own platform (no emulation); its output is platform-independent bytecode.
-FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk-noble AS build
+FROM --platform=$BUILDPLATFORM eclipse-temurin:25-jdk-noble AS build
 WORKDIR /workspace
 
 COPY .mvn/ .mvn/
@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q package -DskipTests \
 ADD --chmod=444 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem certs/rds-global-bundle.pem
 
 # ---- Runtime ----------------------------------------------------------------------------------------------------
-FROM eclipse-temurin:21-jre-noble
+FROM eclipse-temurin:25-jre-noble
 WORKDIR /app
 
 # Dependencies change far less often than application code, so they get their own cacheable layers.
