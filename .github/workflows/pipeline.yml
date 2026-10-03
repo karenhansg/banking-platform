@@ -86,7 +86,7 @@ jobs:
           tflint --recursive --config "$GITHUB_WORKSPACE/infra/.tflint.hcl" --chdir infra
 
       - name: Security scan
-        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        uses: bridgecrewio/checkov-action@2f9fbe2d1e51440f8f5c42abc829aad8e9e4faab # v12.3127.0
         with:
           directory: infra
           config_file: infra/.checkov.yaml
